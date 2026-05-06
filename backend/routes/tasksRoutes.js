@@ -1,28 +1,8 @@
 import express from "express";
+import Task from "../models/Task.js";
+import { getRequestedUserEmail } from "../services/googleService.js";
 
 const router = express.Router();
-
-let nextTaskId = 3;
-const tasksStore = [
-  {
-    id: 1,
-    title: "Complete Math Assignment",
-    description: "Finish chapter 4 exercises",
-    due_date: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
-    progress: 50,
-    completed: false,
-    priority: "high",
-  },
-  {
-    id: 2,
-    title: "Prepare ML Presentation",
-    description: "Draft slides for team sync",
-    due_date: new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString(),
-    progress: 20,
-    completed: false,
-    priority: "medium",
-  },
-];
 
 const calculatePriority = (dueDateValue, progressValue) => {
   const dueDate = new Date(dueDateValue);
@@ -34,58 +14,71 @@ const calculatePriority = (dueDateValue, progressValue) => {
   return "low";
 };
 
-router.post("/", (req, res) => {
-  const task = {
-    id: nextTaskId++,
+router.post("/", async (req, res) => {
+  const userEmail = getRequestedUserEmail(req);
+  const dueDate = String(req.body?.due_date || new Date().toISOString());
+  const progress = Number(req.body?.progress || 0);
+
+  const task = await Task.create({
+    userEmail,
     title: String(req.body?.title || "Untitled"),
     description: String(req.body?.description || ""),
-    due_date: String(req.body?.due_date || new Date().toISOString()),
-    progress: Number(req.body?.progress || 0),
+    due_date: dueDate,
+    progress,
     completed: Boolean(req.body?.completed || false),
-  };
-  task.priority = calculatePriority(task.due_date, task.progress);
-  tasksStore.push(task);
-  return res.json(task);
+    priority: calculatePriority(dueDate, progress),
+  });
+  return res.json({ ...task.toObject(), id: task._id });
 });
 
-router.get("/", (_req, res) => {
-  return res.json(tasksStore);
+router.get("/", async (req, res) => {
+  const userEmail = getRequestedUserEmail(req);
+  const filter = userEmail ? { userEmail } : {};
+  const tasks = await Task.find(filter).sort({ due_date: 1, createdAt: -1 });
+  return res.json(tasks.map((task) => ({ ...task.toObject(), id: task._id })));
 });
 
-router.patch("/:task_id", (req, res) => {
-  const taskId = Number(req.params.task_id);
-  const task = tasksStore.find((item) => item.id === taskId);
+router.patch("/:task_id", async (req, res) => {
+  const { task_id: taskId } = req.params;
+  const userEmail = getRequestedUserEmail(req);
+  const filter = userEmail ? { _id: taskId, userEmail } : { _id: taskId };
+  const task = await Task.findOne(filter);
   if (!task) {
     return res.status(404).json({ detail: "Task not found" });
   }
   const patch = req.body || {};
   Object.keys(patch).forEach((key) => {
-    task[key] = patch[key];
+    task.set(key, patch[key]);
   });
   task.priority = calculatePriority(task.due_date, task.progress);
-  return res.json(task);
+  await task.save();
+  return res.json({ ...task.toObject(), id: task._id });
 });
 
-router.delete("/:task_id", (req, res) => {
-  const taskId = Number(req.params.task_id);
-  const index = tasksStore.findIndex((item) => item.id === taskId);
-  if (index === -1) {
+router.delete("/:task_id", async (req, res) => {
+  const { task_id: taskId } = req.params;
+  const userEmail = getRequestedUserEmail(req);
+  const filter = userEmail ? { _id: taskId, userEmail } : { _id: taskId };
+  const deleted = await Task.findOneAndDelete(filter);
+  if (!deleted) {
     return res.status(404).json({ detail: "Task not found" });
   }
-  tasksStore.splice(index, 1);
   return res.json({ message: "Task deleted" });
 });
 
-router.post("/:task_id/complete", (req, res) => {
-  const taskId = Number(req.params.task_id);
-  const task = tasksStore.find((item) => item.id === taskId);
+router.post("/:task_id/complete", async (req, res) => {
+  const { task_id: taskId } = req.params;
+  const userEmail = getRequestedUserEmail(req);
+  const filter = userEmail ? { _id: taskId, userEmail } : { _id: taskId };
+  const task = await Task.findOne(filter);
   if (!task) {
     return res.status(404).json({ detail: "Task not found" });
   }
   task.completed = true;
   task.progress = 100;
   task.priority = calculatePriority(task.due_date, task.progress);
-  return res.json(task);
+  await task.save();
+  return res.json({ ...task.toObject(), id: task._id });
 });
 
 export default router;

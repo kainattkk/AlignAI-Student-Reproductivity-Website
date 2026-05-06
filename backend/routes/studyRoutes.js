@@ -1,35 +1,39 @@
 import express from "express";
+import StudyMaterial from "../models/StudyMaterial.js";
+import StudyNote from "../models/StudyNote.js";
+import { getRequestedUserEmail } from "../services/googleService.js";
 
 const router = express.Router();
 
-let nextMaterialId = 2;
-let nextNoteId = 2;
-const materialsStore = [{ id: 1, title: "sample.pdf", file_path: "uploads/sample.pdf" }];
-const notesStore = [{ id: 1, title: "Revision Plan", content: "Focus on algorithms and DBMS this week." }];
-
-router.post("/materials/upload", (req, res) => {
+router.post("/materials/upload", async (req, res) => {
+  const userEmail = getRequestedUserEmail(req);
   const fileName = String(req.body?.filename || "uploaded-file");
-  const row = {
-    id: nextMaterialId++,
+  const row = await StudyMaterial.create({
+    userEmail,
     title: fileName,
     file_path: `uploads/${Date.now()}_${fileName}`,
-  };
-  materialsStore.push(row);
-  return res.json(row);
+  });
+  return res.json({ ...row.toObject(), id: row._id });
 });
 
-router.post("/notes", (req, res) => {
-  const row = {
-    id: nextNoteId++,
+router.post("/notes", async (req, res) => {
+  const userEmail = getRequestedUserEmail(req);
+  const row = await StudyNote.create({
+    userEmail,
     title: String(req.body?.title || "Untitled"),
     content: String(req.body?.content || ""),
-  };
-  notesStore.push(row);
-  return res.json(row);
+  });
+  return res.json({ ...row.toObject(), id: row._id });
 });
 
-router.get("/notes", (_req, res) => {
-  return res.json(notesStore);
+router.get("/notes", async (req, res) => {
+  const userEmail = getRequestedUserEmail(req);
+  const filter = userEmail ? { userEmail } : {};
+  const notes = await StudyNote.find(filter).sort({ createdAt: -1 });
+  if (!notes.length) {
+    return res.json([{ id: "fallback-note", title: "Revision Plan", content: "Focus on algorithms and DBMS this week." }]);
+  }
+  return res.json(notes.map((note) => ({ ...note.toObject(), id: note._id })));
 });
 
 router.post("/ask", (req, res) => {

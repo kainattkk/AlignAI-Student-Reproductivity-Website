@@ -1,22 +1,32 @@
 import express from "express";
+import CareerProfile from "../models/CareerProfile.js";
+import { getRequestedUserEmail } from "../services/googleService.js";
 
 const router = express.Router();
 
-let careerProfile = null;
-
-router.post("/profile", (req, res) => {
+router.post("/profile", async (req, res) => {
+  const userEmail = getRequestedUserEmail(req) || "anonymous@local";
   const payload = req.body || {};
-  careerProfile = {
-    target_role: String(payload.target_role || careerProfile?.target_role || ""),
-    skills: String(payload.skills || careerProfile?.skills || ""),
-    interests: String(payload.interests || careerProfile?.interests || ""),
-    experience_level: String(payload.experience_level || careerProfile?.experience_level || ""),
-  };
-  return res.json(careerProfile);
+  const profile = await CareerProfile.findOneAndUpdate(
+    { userEmail },
+    {
+      $set: {
+        userEmail,
+        target_role: String(payload.target_role || ""),
+        skills: String(payload.skills || ""),
+        interests: String(payload.interests || ""),
+        experience_level: String(payload.experience_level || ""),
+      },
+    },
+    { upsert: true, new: true }
+  );
+  return res.json(profile);
 });
 
-router.get("/recommendations", (_req, res) => {
-  const skill = careerProfile?.skills || "your strengths";
+router.get("/recommendations", async (req, res) => {
+  const userEmail = getRequestedUserEmail(req) || "anonymous@local";
+  const profile = await CareerProfile.findOne({ userEmail });
+  const skill = profile?.skills || "your strengths";
   return res.json({
     recommendations: [`Build projects around ${skill}`, "Apply to 3 internships weekly"],
   });

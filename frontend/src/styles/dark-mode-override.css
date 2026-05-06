@@ -20,3 +20,33 @@ html.dark {
   --override-text-primary: #EDEDED;
   --override-text-secondary: #A3A3A3;
 }
+
+/* Force hardcoded dark utility classes to render as light surfaces in light mode.
+   This is a compatibility bridge for pages that still use fixed dark Tailwind values. */
+html:not(.dark) .bg-\[\#1E1E1E\] {
+  background-color: #ffffff !important;
+}
+
+html:not(.dark) .bg-\[\#171717\] {
+  background-color: #f8fafc !important;
+}
+
+html:not(.dark) .border-\[\#2A2A2A\] {
+  border-color: #e5e7eb !important;
+}
+
+html:not(.dark) .text-\[\#EDEDED\] {
+  color: #111827 !important;
+}
+
+html:not(.dark) .text-\[\#A3A3A3\] {
+  color: #6b7280 !important;
+}
+
+html:not(.dark) .hover\:bg-\[\#171717\]:hover {
+  background-color: #f1f5f9 !important;
+}
+
+html:not(.dark) .hover\:bg-\[\#1E1E1E\]:hover {
+  background-color: #e2e8f0 !important;
+}

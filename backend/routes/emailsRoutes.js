@@ -1,43 +1,64 @@
 import express from "express";
 import { getAccountAndAccessToken, getRequestedUserEmail } from "../services/googleService.js";
+import EmailMessage from "../models/EmailMessage.js";
 
 const router = express.Router();
 
-const emailsStore = [
+const fallbackSeeds = [
   {
-    id: "fallback-1",
+    externalId: "fallback-1",
     from: "professor@university.edu",
     subject: "Project milestone update",
     preview: "Please share your latest progress by Friday evening.",
     read: false,
     starred: true,
-    receivedAt: new Date().toISOString(),
+    receivedAt: new Date(),
   },
   {
-    id: "fallback-2",
+    externalId: "fallback-2",
     from: "ta@university.edu",
     subject: "Lab timing confirmation",
     preview: "The lab session has moved to 3:30 PM tomorrow.",
     read: true,
     starred: false,
-    receivedAt: new Date(Date.now() - 3600 * 1000).toISOString(),
+    receivedAt: new Date(Date.now() - 3600 * 1000),
   },
 ];
 
+const getScopedUserEmail = (req) => getRequestedUserEmail(req) || "anonymous@local";
+
+const loadFallbackEmails = async (userEmail) => {
+  const existingCount = await EmailMessage.countDocuments({ userEmail });
+  if (!existingCount) {
+    await EmailMessage.insertMany(fallbackSeeds.map((seed) => ({ ...seed, userEmail })));
+  }
+  const rows = await EmailMessage.find({ userEmail }).sort({ receivedAt: -1 });
+  return rows.map((row) => ({
+    id: row.externalId || String(row._id),
+    from: row.from,
+    subject: row.subject,
+    preview: row.preview,
+    read: row.read,
+    starred: row.starred,
+    receivedAt: row.receivedAt.toISOString(),
+  }));
+};
+
 router.get("/", (req, res) => {
   const handler = async () => {
-    const userEmail = getRequestedUserEmail(req);
-    if (!userEmail) {
-      return res.json(emailsStore);
-    }
+    const requestedEmail = getRequestedUserEmail(req);
+    const userEmail = requestedEmail || "anonymous@local";
     try {
-      const { accessToken } = await getAccountAndAccessToken(userEmail);
+      if (!requestedEmail) {
+        return res.json(await loadFallbackEmails(userEmail));
+      }
+      const { accessToken } = await getAccountAndAccessToken(requestedEmail);
       const indexRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=25", {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       const indexData = await indexRes.json();
       if (!indexRes.ok || !Array.isArray(indexData.messages)) {
-        return res.json(emailsStore);
+        return res.json(await loadFallbackEmails(userEmail));
       }
 
       const output = [];
@@ -65,27 +86,35 @@ router.get("/", (req, res) => {
           receivedAt: dateRaw || new Date().toISOString(),
         });
       }
-      return res.json(output.length ? output : emailsStore);
+      return res.json(output.length ? output : await loadFallbackEmails(userEmail));
     } catch (_err) {
-      return res.json(emailsStore);
+      return res.json(await loadFallbackEmails(userEmail));
     }
   };
-  handler().catch(() => res.json(emailsStore));
+  handler().catch(async () => res.json(await loadFallbackEmails(getScopedUserEmail(req))));
 });
 
 router.post("/:message_id/star", (req, res) => {
   const handler = async () => {
   const { message_id: messageId } = req.params;
   const starred = Boolean(req.body?.starred);
-  const email = emailsStore.find((item) => item.id === messageId);
-  if (email) {
-    email.starred = starred;
+  const requestedEmail = getRequestedUserEmail(req);
+  const userEmail = getScopedUserEmail(req);
+  const orFilter = [{ externalId: messageId }];
+  if (/^[a-f\d]{24}$/i.test(messageId)) {
+    orFilter.push({ _id: messageId });
   }
+  await EmailMessage.findOneAndUpdate(
+    {
+      userEmail,
+      $or: orFilter,
+    },
+    { $set: { starred } }
+  );
 
-    const userEmail = getRequestedUserEmail(req);
-    if (userEmail) {
+    if (requestedEmail) {
       try {
-        const { accessToken } = await getAccountAndAccessToken(userEmail);
+        const { accessToken } = await getAccountAndAccessToken(requestedEmail);
         await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/modify`, {
           method: "POST",
           headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
@@ -107,15 +136,23 @@ router.post("/:message_id/mark-read", (req, res) => {
   const handler = async () => {
   const { message_id: messageId } = req.params;
   const read = Boolean(req.body?.read);
-  const email = emailsStore.find((item) => item.id === messageId);
-  if (email) {
-    email.read = read;
+  const requestedEmail = getRequestedUserEmail(req);
+  const userEmail = getScopedUserEmail(req);
+  const orFilter = [{ externalId: messageId }];
+  if (/^[a-f\d]{24}$/i.test(messageId)) {
+    orFilter.push({ _id: messageId });
   }
+  await EmailMessage.findOneAndUpdate(
+    {
+      userEmail,
+      $or: orFilter,
+    },
+    { $set: { read } }
+  );
 
-    const userEmail = getRequestedUserEmail(req);
-    if (userEmail) {
+    if (requestedEmail) {
       try {
-        const { accessToken } = await getAccountAndAccessToken(userEmail);
+        const { accessToken } = await getAccountAndAccessToken(requestedEmail);
         await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/modify`, {
           method: "POST",
           headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },

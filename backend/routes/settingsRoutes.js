@@ -1,8 +1,10 @@
 import express from "express";
+import Setting from "../models/Setting.js";
+import { getRequestedUserEmail } from "../services/googleService.js";
 
 const router = express.Router();
 
-let settingsStore = {
+const defaultSettings = {
   username: "Student",
   email: "student@example.com",
   notifications: {
@@ -14,13 +16,24 @@ let settingsStore = {
   },
 };
 
-router.get("/", (_req, res) => {
-  return res.json(settingsStore);
+router.get("/", async (req, res) => {
+  const userEmail = getRequestedUserEmail(req) || "anonymous@local";
+  const settings = await Setting.findOneAndUpdate(
+    { userEmail },
+    { $setOnInsert: { ...defaultSettings, userEmail, email: userEmail } },
+    { new: true, upsert: true }
+  );
+  return res.json(settings);
 });
 
-router.put("/", (req, res) => {
+router.put("/", async (req, res) => {
+  const userEmail = getRequestedUserEmail(req) || "anonymous@local";
   const payload = req.body || {};
-  settingsStore = { ...settingsStore, ...payload };
+  await Setting.findOneAndUpdate(
+    { userEmail },
+    { $set: { ...payload, userEmail } },
+    { upsert: true, new: true }
+  );
   return res.json({ message: "Settings saved", data: payload });
 });
 
